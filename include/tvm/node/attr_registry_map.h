@@ -24,6 +24,7 @@
 #define TVM_NODE_ATTR_REGISTRY_MAP_H_
 
 #include <tvm/runtime/container/string.h>
+#include <tvm/runtime/packed_func.h>
 
 #include <utility>
 #include <vector>

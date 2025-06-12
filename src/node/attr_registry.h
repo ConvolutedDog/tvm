@@ -130,7 +130,7 @@ class AttrRegistry {
     }
     uint32_t index = key->AttrRegistryIndex();
     if (op_map->data_.size() > index) {
-      op_map->data_[index] = std::make_pair(TVMRetValue(), 0);
+      op_map->data_[index] = std::make_pair(runtime::TVMRetValue(), 0);
     }
   }
 

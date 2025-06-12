@@ -24,6 +24,7 @@
 #include <tvm/ir/attrs.h>
 #include <tvm/node/node.h>
 #include <tvm/node/reflection.h>
+#include <tvm/runtime/object.h>
 #include <tvm/runtime/registry.h>
 
 namespace tvm {
@@ -84,6 +85,8 @@ class AttrGetter : public AttrVisitor {
 };
 
 runtime::TVMRetValue ReflectionVTable::GetAttr(Object* self, const String& field_name) const {
+  if (self == nullptr) return runtime::TVMRetValue{};
+
   runtime::TVMRetValue ret;
   AttrGetter getter(field_name, &ret);
 

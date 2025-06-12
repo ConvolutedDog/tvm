@@ -39,6 +39,29 @@ from torchvision.models.resnet import ResNet18_Weights, resnet18
 
 torch_model = resnet18(weights=ResNet18_Weights.DEFAULT).eval()
 
+
+class SimpleModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        # (B, 3, 224, 224) -> (B, 64, 57, 57)
+        self.conv = torch.nn.Conv2d(3, 64, kernel_size=6, stride=4, padding=3, bias=False)
+        # (B, 64, 57, 57) -> (B, 64, 29, 29)
+        self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.relu = torch.nn.ReLU(inplace=True)
+        self.fc = torch.nn.Linear(64 * 29 * 29, 1000, bias=False)
+
+    def forward(self, x):
+        out = self.conv(x)
+        out = self.maxpool(out)
+        out = self.relu(out)
+        out = out.view(out.size(0), -1)  # Flatten the tensor
+        out = self.fc(out)
+        return out
+
+
+torch_model = SimpleModule().eval()
+print(torch_model)
+
 ######################################################################
 # Review Overall Flow
 # -------------------
@@ -79,10 +102,22 @@ if not IS_IN_CI:
     # Convert the model to IRModule
     with torch.no_grad():
         exported_program = export(torch_model, example_args)
-        mod = from_exported_program(exported_program, keep_params_as_input=True)
+        print(exported_program)
+        mod = from_exported_program(
+            exported_program,
+            keep_params_as_input=True,
+            unwrap_unit_return_tuple=True,
+            no_bind_return_tuple=False,
+        )
 
     mod, params = relax.frontend.detach_params(mod)
-    mod.show()
+    mod.show(
+        black_format=True,
+        show_meta=False,
+        verbose_expr=False,
+        show_object_address=False,
+        show_all_struct_info=True,
+    )
 
 ######################################################################
 # IRModule Optimization
@@ -96,12 +131,12 @@ if not IS_IN_CI:
 # apply the database to the model to get the best performance.
 #
 
-TOTAL_TRIALS = 8000  # Change to 20000 for better performance if needed
-target = tvm.target.Target("nvidia/geforce-rtx-3090-ti")  # Change to your target device
+TOTAL_TRIALS = 0  # Change to 20000 for better performance if needed
+target = tvm.target.Target("nvidia/nvidia-h100")  # Change to your target device
 work_dir = "tuning_logs"
 
 if not IS_IN_CI:
-    mod = relax.get_pipeline("static_shape_tuning", target=target, total_trials=TOTAL_TRIALS)(mod)
+    # mod = relax.get_pipeline("static_shape_tuning", target=target, total_trials=TOTAL_TRIALS)(mod)
 
     # Only show the main function
     mod["main"].show()
@@ -113,7 +148,9 @@ if not IS_IN_CI:
 # We skip this step in the CI environment.
 
 if not IS_IN_CI:
-    ex = tvm.compile(mod, target="cuda")
+    ex = tvm.compile(mod, target="c")
+    print("ex: \n", ex)
+
     dev = tvm.device("cuda", 0)
     vm = relax.VirtualMachine(ex, dev)
     # Need to allocate data and params on GPU device

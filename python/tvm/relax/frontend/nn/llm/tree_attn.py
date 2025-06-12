@@ -46,6 +46,9 @@ def _rope(
     qkv_dtype: str,
     rope_scaling: Dict[str, Any],
 ):
+    """
+    Rotary Position Embedding
+    """
     d = indices[-1]
     cos_freq, sin_freq, var_map = switch_rope_freq_func(rope_scaling)(
         offset * scale, d, rotary_dim, theta, "float32"

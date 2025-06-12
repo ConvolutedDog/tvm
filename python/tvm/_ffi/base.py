@@ -76,6 +76,8 @@ except ImportError:
 __version__ = libinfo.__version__
 # library instance
 _LIB, _LIB_NAME = _load_lib()
+# _LIB: <CDLL '/tvm/build/libtvm.so', handle 55bf5a8ae230 at 0x7ff0ee3a7950>
+# _LIB_NAME: 'libtvm.so'
 
 # Whether we are runtime only
 _RUNTIME_ONLY = "runtime" in _LIB_NAME
