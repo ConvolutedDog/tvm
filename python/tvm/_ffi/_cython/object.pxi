@@ -99,6 +99,14 @@ class PyNativeObject:
 
 
 cdef class ObjectBase:
+    """Base class for all objects.
+
+    It maintaines a handle (chandle) to the underlying C++ object. All frontend
+    subclasses of backend Object should use __init_handle_by_constructor__ to
+    initialize the handle.
+    """
+
+    # chandle is the handle to the underlying C++ object.
     cdef void* chandle
 
     cdef inline _set_handle(self, handle):

@@ -30,6 +30,16 @@ from ._cy3.core import convert_to_tvm_func, _get_global_func, PackedFuncBase
 def register_object(type_key=None):
     """register object type.
 
+    This function just seek the type_key in the global registry in
+    backend C++ and stores the corresponding type index and frontend
+    class in frontend Python:
+
+        cdef list OBJECT_TYPE = []
+        cdef dict OBJECT_INDEX = {}
+
+    Users can get the type_index of one frontend Python cls by using
+    get_object_type_index(cls).
+
     Parameters
     ----------
     type_key : str or cls
@@ -65,9 +75,13 @@ def register_object(type_key=None):
         _register_object(tindex, cls)
         return cls
 
+    # Like @register_object("xxx")
+    #      class xxx: ...
     if isinstance(type_key, str):
         return register
 
+    # Like @register_object
+    #      class xxx: ...
     return register(type_key)
 
 
@@ -147,6 +161,10 @@ def register_extension(cls, fcreate=None):
 def register_func(func_name, f=None, override=False):
     """Register global function
 
+    This will register the function to TVM runtime, that is the function
+    table in backend C++, so that this function can be called from both
+    backend C++ and frontend Python.
+
     Parameters
     ----------
     func_name : str or function
@@ -184,6 +202,7 @@ def register_func(func_name, f=None, override=False):
       assert y == 10
     """
     if callable(func_name):
+        """Without providing a func name str, func_name is the function itself."""
         f = func_name
         func_name = f.__name__
 
@@ -195,7 +214,22 @@ def register_func(func_name, f=None, override=False):
     def register(myf):
         """internal register function"""
         if not isinstance(myf, PackedFuncBase):
+            # Convert a python function to TVM function
             myf = convert_to_tvm_func(myf)
+
+        # TVMFuncRegisterGlobal is defined in tvm/runtime/c_runtime_api.h
+        #
+        # TVM_DLL int TVMFuncRegisterGlobal(const char* name,
+        #                                   TVMFunctionHandle f,
+        #                                   int override);
+        #
+        # \brief Register the function to runtime's global table.
+        #
+        # The registered function then can be pulled by the backend by the name.
+        #
+        # \param name The name of the function.
+        # \param f The function to be registered.
+        # \param override Whether allow override already registered function.
         check_call(_LIB.TVMFuncRegisterGlobal(c_str(func_name), myf.handle, ioverride))
         return myf
 
@@ -287,6 +321,11 @@ def _get_api(f):
 
 def _init_api(namespace, target_module_name=None):
     """Initialize api for a given module name
+
+    This function actually searches for all global functions that
+    start with the prefix (namespace), and then creates a function with
+    the same name in the module (target_module_name), and assigns the
+    packed function to it.
 
     namespace : str
        The namespace of the source registry

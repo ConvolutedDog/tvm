@@ -75,11 +75,18 @@ cdef extern from "tvm/runtime/c_runtime_api.h":
         DLDataType v_type
         DLDevice v_device
 
+# type of array index.
 ctypedef int64_t tvm_index_t
+# Handle to hold DLTensor.
 ctypedef DLTensor* DLTensorHandle
+# The stream that is specific to device can be NULL, which
+# indicates the default one.
 ctypedef void* TVMStreamHandle
+# Handle to hold return value.
 ctypedef void* TVMRetValueHandle
+# Handle to packed function handle.
 ctypedef void* TVMPackedFuncHandle
+# Handle to Object.
 ctypedef void* ObjectHandle
 
 ctypedef struct TVMObject:

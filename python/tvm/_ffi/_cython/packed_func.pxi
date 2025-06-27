@@ -24,6 +24,11 @@ from ..runtime_ctypes import DataType, Device, TVMByteArray, ObjectRValueRef
 
 
 cdef void tvm_callback_finalize(void* fhandle) with gil:
+    """The finalizer on resource handle (2nd param of TVMFuncCreateFromCFunc,
+    which wraps a TVMPackedCFunc to become a FunctionHandle) when the
+    FunctionHandle get freed, can be NULL. In fact it is used as the deleter
+    of the fhandle in backend C++.
+    """
     local_pyfunc = <object>(fhandle)
     Py_DECREF(local_pyfunc)
 
@@ -32,6 +37,42 @@ cdef int tvm_callback(TVMValue* args,
                       int num_args,
                       TVMRetValueHandle ret,
                       void* fhandle) with gil:
+    """The tvm_callback function is the 1st param of TVMFuncCreateFromCFunc.
+    And it is the callback function to be called by TVM backend C++ to define
+    a PackedFunc using passed-in arguments from frontend Python. In fact, the
+    registered lambda function will invoke tvm_callback to do the work:
+
+    1. fhandle is the Python func handle as the last argument of tvm_callback.
+    2. TVMValue* args, int* type_codes, int num_args, TVMRetValueHandle ret,
+       these three arguments should be provided when invoking the registered
+       function.
+    3. This function will be called by TVM backend C++ to invoke and execute
+       the registered Python function.
+    4. If the local Python function returns a value (rv is not None), this
+       function should be stored in ret, because once the local Python func
+       is invoked from the C++ backend side, the return value will be only
+       returned to the frontend Python side (after all, Python functions are
+       executed on the Python side). So, at this point, we need to copy the
+       return value to ret.
+
+    Its signature is:
+
+    typedef int (*TVMPackedCFunc)(TVMValue* args,
+                                  int* type_codes,
+                                  int num_args,
+                                  TVMRetValueHandle ret,
+                                  void* resource_handle);
+
+    \brief C type of packed function.
+
+    \param args The arguments
+    \param type_codes The type codes of the arguments
+    \param num_args Number of arguments.
+    \param ret The return value handle.
+    \param resource_handle The handle additional resouce handle from front-end.
+    \return 0 if success, -1 if failure happens, set error via TVMAPISetLastError.
+    \sa TVMCFuncSetReturn
+    """
     cdef list pyargs
     cdef TVMValue value
     cdef int tcode
@@ -46,6 +87,18 @@ cdef int tvm_callback(TVMValue* args,
             tcode == kTVMNDArrayHandle or
             tcode == kTVMObjectRefArg or
             tcode >= kTVMExtBegin):
+            # If the argument is handle, we need to convert it to TVMRetValue,
+            # as the content represented by this handle may be modified by the
+            # backend C++ and will be former use in the frontend Python.
+            #
+            # \brief Inplace translate callback argument value to return value.
+            # This is only needed for non-POD arguments.
+            #
+            # \param value The value to be translated.
+            # \param code The type code to be translated.
+            # \note This function will do a shallow copy when necessary.
+            #
+            # \return 0 when success, nonzero when failure happens.
             CHECK_CALL(TVMCbArgToReturn(&value, &tcode))
 
         if tcode != kTVMDLTensorHandle:
@@ -53,6 +106,8 @@ cdef int tvm_callback(TVMValue* args,
         else:
             pyargs.append(c_make_array(value.v_handle, True, False))
     try:
+        # Execute the frontend Python function, this is the reason why backend
+        # C++ can call frontend Python function easily.
         rv = local_pyfunc(*pyargs)
     except Exception as err:
         msg = traceback.format_exc()
@@ -64,12 +119,27 @@ cdef int tvm_callback(TVMValue* args,
         if isinstance(rv, tuple):
             raise ValueError("PackedFunction can only support one return value")
         temp_args = []
+        # Pack arguments into c args tvm call accept
         make_arg(rv, &value, &tcode, temp_args)
+
+        # \brief Set the return value of TVMPackedCFunc.
+        #
+        # TVMCFuncSetReturn is called by TVMPackedCFunc to set the return value.
+        # When this function is not called, the function returns null by default.
+        #
+        # \param ret The return value handle, pass by ret in TVMPackedCFunc.
+        # \param value The value to be returned.
+        # \param type_code The type of the value to be returned.
+        # \param num_ret Number of return values, for now only 1 is supported.
         CHECK_CALL(TVMCFuncSetReturn(ret, &value, &tcode, 1))
     return 0
 
 
 cdef object make_packed_func(TVMPackedFuncHandle chandle, int is_global):
+    """After convert_to_tvm_func is called, this function will be called to
+    create the python object according to the PackedFunc function address
+    (chandle) returned by the backend C++.
+    """
     obj = _CLASS_PACKED_FUNC.__new__(_CLASS_PACKED_FUNC)
     (<PackedFuncBase>obj).chandle = chandle
     (<PackedFuncBase>obj).is_global = is_global
@@ -91,10 +161,50 @@ def convert_to_tvm_func(object pyfunc):
     """
     cdef TVMPackedFuncHandle chandle
     Py_INCREF(pyfunc)
+
+    # TVMFuncCreateFromCFunc is defined in include/tvm/runtime/c_runtime_api.h
+    #
+    # TVM_DLL int TVMFuncCreateFromCFunc(TVMPackedCFunc func,
+    #                                    void* resource_handle,
+    #                                    TVMPackedCFuncFinalizer fin,
+    #                                    TVMFunctionHandle* out);
+    #
+    # \brief Wrap a TVMPackedCFunc to become a FunctionHandle.
+    #
+    # The resource_handle will be managed by TVM API, until the function
+    # is no longer used.
+    #
+    # \param func The packed C function.
+    # \param resource_handle The resource handle from front-end,
+    #                        can be NULL.
+    # \param fin The finalizer on resource handle when the FunctionHandle
+    #           get freed, can be NULL.
+    # \param out the result function handle.
+    # \return 0 when success, nonzero when failure happens.
+    #
+    # In fact, in the backend, this function mainly does the following:
+    #
+    # \code{.cpp}
+    # ret = PackedFunc([func, resource_handle](TVMArgs args, TVMRetValue* rv) {
+    #   int ret = func(const_cast<TVMValue*>(args.values), const_cast<int*>(args.type_codes),
+    #                  args.num_args, rv, resource_handle);
+    #   if (ret != 0) {
+    #     TVMThrowLastError();
+    #   }
+    # });
+    # // MoveToCHost moves the value back to front-end via C API.
+    # ret.MoveToCHost(&val, &type_code);
+    # *out = val.v_handle;
+    # \endcode
+    #
+    # So that here, chandle is actually a PackedFunc object's address to
+    # the packed function.
     CHECK_CALL(TVMFuncCreateFromCFunc(tvm_callback,
                                       <void*>(pyfunc),
                                       tvm_callback_finalize,
                                       &chandle))
+    # Create the python object according to the PackedFunc function address
+    # (chandle) returned by the backend C++.
     return make_packed_func(chandle, False)
 
 
@@ -249,6 +359,7 @@ cdef inline int FuncCall3(void* chandle,
     cdef int[3] tcodes
     nargs = len(args)
     temp_args = []
+    # Pack arguments into c args tvm call accept
     for i in range(nargs):
         make_arg(args[i], &values[i], &tcodes[i], temp_args)
 
@@ -263,9 +374,15 @@ cdef inline int FuncCall(void* chandle,
                          tuple args,
                          TVMValue* ret_val,
                          int* ret_tcode) except -1:
+    """Invoke the registered function in the function table in
+    backend C++.
+    """
     cdef int nargs
     cdef int c_api_ret_code
     nargs = len(args)
+    # If the number of args is less than or qual to 3, just use
+    # an array to store the arguments. Else, use a vector to store
+    # the arguments.
     if nargs <= 3:
         FuncCall3(chandle, args, nargs, ret_val, ret_tcode)
         return 0
@@ -275,6 +392,7 @@ cdef inline int FuncCall(void* chandle,
     values.resize(max(nargs, 1))
     tcodes.resize(max(nargs, 1))
     temp_args = []
+    # Pack arguments into c args tvm call accept
     for i in range(nargs):
         make_arg(args[i], &values[i], &tcodes[i], temp_args)
 
@@ -289,7 +407,89 @@ cdef inline int ConstructorCall(void* constructor_handle,
                                 int type_code,
                                 tuple args,
                                 void** handle) except -1:
-    """Call contructor of a handle function"""
+    """Call contructor of a handle function
+
+    For example, TVM defined the following API in python/tvm/arith/_ffi_api.py:
+
+    \code{.py}
+    import tvm._ffi
+    tvm._ffi._init_api("arith", __name__) # __name__ = tvm.arith
+    \endcode
+
+    And the definition of _init_api is as follows:
+
+    \code{.py}
+    def _get_api(f):
+        flocal = f
+        flocal.is_global = True
+        return flocal
+
+    def _init_api(namespace, target_module_name=None):
+        # Initialize api for a given module name
+        #
+        # namespace : str
+        #    The namespace of the source registry
+        #
+        # target_module_name : str
+        #    The target module name if different from namespace
+        #
+        target_module_name = 
+            target_module_name if target_module_name else namespace
+        if namespace.startswith("tvm."):
+            _init_api_prefix(target_module_name, namespace[4:])
+        else:
+        _init_api_prefix(target_module_name, namespace)
+
+    def _init_api_prefix(module_name, prefix):
+        module = sys.modules[module_name]
+
+        for name in list_global_func_names():
+            if not name.startswith(prefix):
+                continue
+
+            fname = name[len(prefix) + 1 :]
+            target_module = module
+
+            if fname.find(".") != -1:
+                continue
+            f = get_global_func(name)
+            ff = _get_api(f)
+            ff.__name__ = fname
+            ff.__doc__ = "TVM PackedFunc %s. " % fname
+            setattr(target_module, ff.__name__, ff)
+    \endcode
+
+    So, this function actually searches for all global functions that
+    start with the prefix ("arith"), and then creates a function with
+    the same name in the module (tvm.arith), and assigns the packed
+    function to it.
+
+    Then if we call tvm.arith.ConstIntBound(min_val, max_val), it will
+    call the underlying packed function in backend C++.
+
+    The following code will call __init_handle_by_constructor__, and
+    _ffi_api.ConstIntBound actually invokes the packed function called
+    arith.ConstIntBound, which is registered in the backend C++. And
+    __init_handle_by_constructor__ will former call ConstructorCall
+    and finally call FuncCall, which will invoke the registered func
+    in the function table in backend C++.
+
+    \code{.py}
+    @tvm._ffi.register_object("arith.ConstIntBound")
+    class ConstIntBound(Object):
+        POS_INF = (1 << 63) - 1
+        NEG_INF = -POS_INF
+
+        def __init__(self, min_value, max_value):
+            self.__init_handle_by_constructor__(_ffi_api.ConstIntBound,
+                                                min_value, max_value)
+    \endcode
+
+    constructor_handle is (<PackedFuncBase>arith.ConstIntBound).chandle,
+    type_code is kTVMObjectHandle, args is (min_value, max_value), and
+    handle is the frontend arith.ConstIntBound's chandle which is the
+    handle to the underlying C++ object.
+    """
     cdef TVMValue ret_val
     cdef int ret_tcode
     FuncCall(constructor_handle, args, &ret_val, &ret_tcode)
@@ -299,6 +499,14 @@ cdef inline int ConstructorCall(void* constructor_handle,
 
 
 cdef class PackedFuncBase:
+    """This class is corresponding to the PackedFunc in backend C++.
+    The chandle is used to hold the handle to the backend PackedFunc,
+    and is_global is used to indicate whether the handle is a global
+    function.
+
+    Note: chandle is actually a void pointer, and the PackedFuncBase
+    class is used to wrap the handle to provide a python interface.
+    """
     cdef TVMPackedFuncHandle chandle
     cdef int is_global
 
@@ -336,11 +544,32 @@ cdef class PackedFuncBase:
         cdef TVMValue ret_val
         cdef int ret_tcode
         ret_tcode = kTVMNullptr
+        # Call the registered function in backend C++.
+        #
+        # Note that the frontend Python function has been registered
+        # to the function table in backend C++ as a global function,
+        # FuncCall will call TVMFuncCall to invoke the registered
+        # Python function.
         FuncCall(self.chandle, args, &ret_val, &ret_tcode)
         return make_ret(ret_val, ret_tcode)
 
 
 def _get_global_func(name, allow_missing):
+    """Get a global function by name
+
+    Parameters
+    ----------
+    name : str
+        The name of the global function
+
+    allow_missing : bool
+        Whether allow missing function or raise an error.
+
+    Returns
+    -------
+    func : PackedFunc
+        The function to be returned, None if function is missing.
+    """
     cdef TVMPackedFuncHandle chandle
     CHECK_CALL(TVMFuncGetGlobal(c_str(name), &chandle))
     if chandle != NULL:

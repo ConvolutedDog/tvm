@@ -132,11 +132,13 @@ class DataType(ctypes.Structure):
     def __init__(self, type_str):
         super(DataType, self).__init__()
         numpy_str_map = DataType.NUMPY2STR
+        # if type_str is numpy dtype, convert to str
         if type_str in numpy_str_map:
             type_str = numpy_str_map[type_str]
         elif isinstance(type_str, np.dtype):
             type_str = str(type_str)
 
+        # else type_str is str, parse it
         assert isinstance(type_str, str)
 
         str_dtype_map = DataType.STR2DTYPE
@@ -147,12 +149,15 @@ class DataType(ctypes.Structure):
             self.lanes = dtype_map["lanes"]
             return
 
+        # type_str is str but may be a vector type, like "float32x4", "float32xvscalex4"
         arr = type_str.split("x")
         head = arr[0]
         if len(arr) == 3:
+            # type_str is like "float32xvscalex4"
             assert arr[1] == "vscale", f"Invalid data type. Expected 'vscale' but got '{arr[1]}'"
             self.lanes = ctypes.c_uint16(-int(arr[2]))
         elif len(arr) > 1:
+            # type_str is like "float32x4"
             self.lanes = ctypes.c_uint16(int(arr[1]))
         else:
             self.lanes = 1
