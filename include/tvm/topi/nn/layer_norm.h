@@ -25,6 +25,8 @@
 #define TVM_TOPI_NN_LAYER_NORM_H_
 
 #include <tvm/te/operation.h>
+#include <tvm/topi/broadcast.h>
+#include <tvm/topi/reduction.h>
 #include <tvm/topi/tags.h>
 
 #include <string>

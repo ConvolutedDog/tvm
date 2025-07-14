@@ -48,6 +48,7 @@ from tvm import TVMError, relax, tir, topi
 from tvm.ir import IRModule
 from tvm.ir.supply import NameSupply
 from tvm.tir.generic import cast
+from tvm.topi.utils import get_const_tuple
 
 from ..common import autopad
 
@@ -1339,9 +1340,14 @@ class CumSum(OnnxOpConverter):
             axis = int(axis.data.numpy())
         elif isinstance(axis, relax.Var):
             axis = 0
-        data = relax.op.cumsum(data, axis)
+
         if attr.get("reverse", 0) != 0:
             data = bb.emit_te(topi.flip, data, axis=axis if axis else 0)
+        data = relax.op.cumsum(data, axis)
+        data = bb.normalize(data)
+        if attr.get("reverse", 0) != 0:
+            data = bb.emit_te(topi.flip, data, axis=axis if axis else 0)
+
         return data
 
 
@@ -2120,13 +2126,18 @@ class Resize(OnnxOpConverter):
 
         # Define relax implementation.
         if roi is not None:
-            roi = relax.op.concat(
-                [
-                    relax.op.strided_slice(roi, axes=[0], begin=[2], end=[ndims]),
-                    relax.op.strided_slice(roi, axes=[0], begin=[ndims + 2], end=[2 * ndims]),
-                ],
-                axis=0,
-            )
+            if isinstance(roi, relax.Constant):
+                roi = roi.data.numpy().tolist()
+            else:
+                roi = relax.op.concat(
+                    [
+                        relax.op.strided_slice(roi, axes=[0], begin=[2], end=[ndims]),
+                        relax.op.strided_slice(roi, axes=[0], begin=[ndims + 2], end=[2 * ndims]),
+                    ],
+                    axis=0,
+                )
+                # TODO The backend C++ func resize2d does not support dynamic ROI now.
+                raise NotImplementedError("Dynamic ROI is not supported in resize2d for now.")
         else:
             roi = [0.0] * 4
 
@@ -2488,6 +2499,23 @@ class LayerNormalization(OnnxOpConverter):
         bias = inputs[2]
         axis = attr.get("axis", -1)
         epsilon = attr.get("epsilon", 1e-05)
+
+        gamma_shape = get_const_tuple(scale.struct_info.shape)
+
+        if bias is None:
+            seq_len = data.struct_info.shape[1].value
+            bias = relax.const([0.0] * seq_len, dtype="float32")
+        else:
+            # TODO (ConvolutedDog) It should check if gamma and beta
+            # shapes match when bias is not None. Currently this is
+            # only intended to support the importing from ONNX.
+            beta_shape = get_const_tuple(bias.struct_info.shape)
+            if gamma_shape != beta_shape:
+                raise ValueError("gamma and beta shapes do not match")
+
+        axis = list(axis) if isinstance(axis, (list, tuple)) else [axis]
+        if len(axis) < len(gamma_shape):
+            axis.extend(range(axis[-1] + 1, axis[-1] + 1 + len(gamma_shape) - len(axis)))
 
         output = relax.op.nn.layer_norm(data, scale, bias, axis, epsilon)
         # Onnx layernorm has 3 outputs but only the first is used.
@@ -2908,15 +2936,11 @@ class DepthToSpace(OnnxOpConverter):
         mode = attr.get("mode", b"DCR").decode("utf-8")
         b, c, h, w = inputs[0].struct_info.shape
         if mode == "DCR":
-            x = relax.op.reshape(
-                inputs[0], (b, block_size, block_size, c // (block_size**2), h, w)
-            )
+            x = relax.op.reshape(inputs[0], (b, block_size, block_size, c // (block_size**2), h, w))
             x = relax.op.permute_dims(x, [0, 3, 4, 1, 5, 2])
             return relax.op.reshape(x, (b, c // (block_size**2), h * block_size, w * block_size))
         elif mode == "CRD":
-            x = relax.op.reshape(
-                inputs[0], (b, c // (block_size**2), block_size, block_size, h, w)
-            )
+            x = relax.op.reshape(inputs[0], (b, c // (block_size**2), block_size, block_size, h, w))
             x = relax.op.permute_dims(x, [0, 1, 4, 2, 5, 3])
             return relax.op.reshape(x, (b, c // (block_size**2), h * block_size, w * block_size))
         else:
