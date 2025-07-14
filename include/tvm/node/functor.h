@@ -41,6 +41,11 @@ using runtime::ObjectRef;
  * This is a class that is useful to construct polymorphic dispatching
  * base on the AST/IR node's type.
  *
+ * The NodeFunctor actually stores the dispatch functions of all ObjectRef
+ * types in the internal vector `std::vector<FPointer> func_` where FPointer
+ * is the function pointer type of dispatching functions. This vector is indexed
+ * using the type_index of the ObjectRefs.
+ *
  * \code
  *   NodeFunctor<std::string (const ObjectRef& n, std::string prefix)> tostr;
  *   tostr.set_dispatch<Add>([](const ObjectRef& op, std::string prefix) {

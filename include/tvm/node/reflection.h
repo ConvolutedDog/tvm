@@ -77,6 +77,20 @@ class AttrVisitor {
  *
  * Functions are stored in columnar manner.
  * Each column is a vector indexed by Object's type_index.
+ *
+ * Reflection table actually stores the function pointers according to Object's type_index.
+ * These function pointers are stored in the following vectors and indexed by type_index.
+ *
+ *     // Attribute visitor.
+ *     std::vector<FVisitAttrs> fvisit_attrs_;
+ *     // Structural equal function.
+ *     std::vector<FSEqualReduce> fsequal_reduce_;
+ *     // Structural hash function.
+ *     std::vector<FSHashReduce> fshash_reduce_;
+ *     // Creation function.
+ *     std::vector<FCreate> fcreate_;
+ *     // ReprBytes function.
+ *     std::vector<FReprBytes> frepr_bytes_;
  */
 class ReflectionVTable {
  public:

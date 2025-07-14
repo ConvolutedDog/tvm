@@ -24,6 +24,10 @@
 namespace tvm {
 namespace tir {
 
+/*!
+ * \brief Tranform a tvm::DataType object to a int32_t. The total bits of
+ * dtype is encoded in 32 bits.
+ */
 int32_t DataType2Int(const tvm::DataType& dtype) {
   static_assert(sizeof(DLDataType) == sizeof(int32_t), "Incorrect size of DLDataType");
   union {
@@ -36,6 +40,11 @@ int32_t DataType2Int(const tvm::DataType& dtype) {
   return converter.dst;
 }
 
+/*!
+ * \brief Tranform a int32_t object to a tvm::DataType object.
+ *
+ * \sa DataType2Int
+ */
 String Int2DataTypeStr(int32_t dtype) {
   union {
     DLDataType dst;

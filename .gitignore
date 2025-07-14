@@ -274,3 +274,8 @@ tvm-site/
 
 # GDB history file
 .gdb_history
+
+# Tune database
+tune_tmp
+tune_temp
+tuning_logs

@@ -42,7 +42,13 @@ namespace relax {
  *  You can use this as a more powerful Visitor, since it allows you to
  *  define function signatures of Visit Function.
  *
- * \sa tvm/ir_functor.h
+ * This virtual class stores a NodeFunctor object defined in tvm/node/functor.h,
+ * which dispatches Expr nodes instead of original ObjectRef objetcs as the
+ * first argument to dispatch the VisitExpr_ functions. Other functor dispatch
+ * classes that inherits from this class should override VisitExpr_ functions.
+ *
+ * \sa ExprVisitor, ExprMutatorBase, ExprMutator
+ * \sa tvm/node/functor.h
  *
  * \tparam FType function signature
  *  This type is only defined for FType with function signature R(const Expr&,
@@ -184,6 +190,9 @@ class ExprFunctor<R(const Expr& n, Args...)> {
 /*!
  * \brief A simple visitor wrapper around ExprFunctor.
  *  Recursively visit the content.
+ *
+ * This dispatcher donot accept any arguments and returns void. And ExprVisitor
+ * only visits the Expr nodes that are contained in the AST.
  */
 class ExprVisitor : public ExprFunctor<void(const Expr&)> {
  public:

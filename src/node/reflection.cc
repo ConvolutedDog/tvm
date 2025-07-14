@@ -26,6 +26,8 @@
 #include <tvm/node/reflection.h>
 #include <tvm/runtime/registry.h>
 
+#include "tvm/runtime/packed_func.h"
+
 namespace tvm {
 
 using runtime::PackedFunc;
@@ -84,6 +86,10 @@ class AttrGetter : public AttrVisitor {
 };
 
 runtime::TVMRetValue ReflectionVTable::GetAttr(Object* self, const String& field_name) const {
+  /// @todo (ConvolutedDog) When using VSCode debug GUI, self may
+  /// be nullptr.
+  /// if(self == nullptr) return runtime::TVMRetValue();
+
   runtime::TVMRetValue ret;
   AttrGetter getter(field_name, &ret);
 
@@ -160,6 +166,21 @@ ObjectPtr<Object> ReflectionVTable::CreateInitObject(const std::string& type_key
   return fcreate_[tindex](repr_bytes);
 }
 
+/**
+ * \brief Node attribute setter class that visits and sets attributes of
+ * a Node object.
+ *
+ * This class inherits from AttrVisitor and provides implementations for
+ * various attribute types. It maintains a map of attribute names to their
+ * values and uses them to set the corresponding attributes of a Node object
+ * when visited.
+ *
+ * \example When users want to set attributes of a Node object, they should
+ * fill a map of attribute names to their values and pass to the NodeAttrSetter
+ * class, and then execute ReflectionVTable::Gloabl->VisitAttrs(n, &setter).
+ *
+ * \sa InitNodeByPackedArgs
+ */
 class NodeAttrSetter : public AttrVisitor {
  public:
   std::string type_key;
@@ -189,6 +210,7 @@ class NodeAttrSetter : public AttrVisitor {
       LOG(FATAL) << type_key << ": require field " << key;
     }
     runtime::TVMArgValue v = it->second;
+    // Remove the field from attrs if it is consumed.
     attrs.erase(it);
     return v;
   }

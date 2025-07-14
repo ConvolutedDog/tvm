@@ -83,9 +83,24 @@ class Profiler : public runtime::ObjectRef {
   Profiler();
   TVM_DEFINE_MUTABLE_NOTNULLABLE_OBJECT_REF_METHODS(Profiler, runtime::ObjectRef, ProfilerNode);
 
-  /*! \brief Entering the scope of the context manager */
+  /*! \brief Entering the scope of the context manager
+   *
+   * This function will push the current Profiler object back to static
+   * thread_local std::vector<Profiler> profilers, and set the current
+   * time (std::chrono::high_resolution_clock::now()).
+   * 
+   * Also, this function will define total_timer that will be called when
+   * the scope is exited through calling ProfilerTimedScope("Total"), this
+   * afterwards will be called to record the end time and the time usage
+   * during this scope. The elasped time will be recorded in the stats_sec.
+   */
   void EnterWithScope();
-  /*! \brief Exiting the scope of the context manager */
+  /*! \brief Exiting the scope of the context manager
+   *
+   * This function will pop the last Profiler object from static thread_local
+   * std::vector<Profiler> profilers, and execute the function defined in
+   * total_timer.
+   */
   void ExitWithScope();
   /*! \brief Returns the current profiler */
   static Optional<Profiler> Current();

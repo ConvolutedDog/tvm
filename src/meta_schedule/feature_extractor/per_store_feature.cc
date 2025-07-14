@@ -552,25 +552,192 @@ Feature::ArithOps::ArithOps(const BufferStoreNode* store, int64_t prod_loop_exte
     }                                                      \
     ExprVisitor::VisitExpr_(op);                           \
   }
-    TVM_FEATURE_SIMPLE(AndNode, bool_op);
-    TVM_FEATURE_SIMPLE(OrNode, bool_op);
-    TVM_FEATURE_SIMPLE(NotNode, bool_op);
-    TVM_FEATURE_SIMPLE(SelectNode, select_op);
-    TVM_FEATURE_BINARY(AddNode, float_add_sub, int_add_sub);
-    TVM_FEATURE_BINARY(SubNode, float_add_sub, int_add_sub);
-    TVM_FEATURE_BINARY(MulNode, float_mul, int_mul);
-    TVM_FEATURE_BINARY(DivNode, float_div_mod, int_div_mod);
-    TVM_FEATURE_BINARY(ModNode, float_div_mod, int_div_mod);
-    TVM_FEATURE_BINARY(FloorDivNode, float_div_mod, int_div_mod);
-    TVM_FEATURE_BINARY(FloorModNode, float_div_mod, int_div_mod);
-    TVM_FEATURE_BINARY(MaxNode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(MinNode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(EQNode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(NENode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(LTNode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(LENode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(GTNode, float_cmp, int_cmp);
-    TVM_FEATURE_BINARY(GENode, float_cmp, int_cmp);
+    /*!
+     * AndNode/OrNode/NotNode => result_.bool_op
+     * SelectNode => result_.select_op
+     * AddNode/SubNode => result_.float_add_sub or
+     *                    result_.int_add_sub
+     * MulNode => result_.float_mul or
+     *            result_.int_mul
+     * DivNode/ModNode/FloorDivNode/FloorModNode => result_.float_div_mod or
+     *                                              result_.int_div_mod
+     * MaxNode/MinNode/EQNode/NENode/LTNode/LENode/GTNode/GENode => result_.float_cmp or
+     *                                                              result_.int_cmp
+     */
+    // TVM_FEATURE_SIMPLE(AndNode, bool_op);
+    // Expands to
+    void VisitExpr_(const AndNode* op) final {
+      result_.bool_op += this->prod_loop_extent_;
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_SIMPLE(OrNode, bool_op);
+    // Expands to
+    void VisitExpr_(const OrNode* op) final {
+      result_.bool_op += this->prod_loop_extent_;
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_SIMPLE(NotNode, bool_op);
+    // Expands to
+    void VisitExpr_(const NotNode* op) final {
+      result_.bool_op += this->prod_loop_extent_;
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_SIMPLE(SelectNode, select_op);
+    // Expands to
+    void VisitExpr_(const SelectNode* op) final {
+      result_.select_op += this->prod_loop_extent_;
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(AddNode, float_add_sub, int_add_sub);
+    // Expands to
+    void VisitExpr_(const AddNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_add_sub += this->prod_loop_extent_;
+      } else {
+        result_.int_add_sub += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(SubNode, float_add_sub, int_add_sub);
+    // Expands to
+    void VisitExpr_(const SubNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_add_sub += this->prod_loop_extent_;
+      } else {
+        result_.int_add_sub += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(MulNode, float_mul, int_mul);
+    // Expands to
+    void VisitExpr_(const MulNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_mul += this->prod_loop_extent_;
+      } else {
+        result_.int_mul += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(DivNode, float_div_mod, int_div_mod);
+    // Expands to
+    void VisitExpr_(const DivNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_div_mod += this->prod_loop_extent_;
+      } else {
+        result_.int_div_mod += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(ModNode, float_div_mod, int_div_mod);
+    // Expands to
+    void VisitExpr_(const ModNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_div_mod += this->prod_loop_extent_;
+      } else {
+        result_.int_div_mod += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(FloorDivNode, float_div_mod, int_div_mod);
+    // Expands to
+    void VisitExpr_(const FloorDivNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_div_mod += this->prod_loop_extent_;
+      } else {
+        result_.int_div_mod += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(FloorModNode, float_div_mod, int_div_mod);
+    // Expands to
+    void VisitExpr_(const FloorModNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_div_mod += this->prod_loop_extent_;
+      } else {
+        result_.int_div_mod += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(MaxNode, float_cmp, int_cmp);
+    // Expands to
+    void VisitExpr_(const MaxNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_cmp += this->prod_loop_extent_;
+      } else {
+        result_.int_cmp += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(MinNode, float_cmp, int_cmp);
+    // Expands to
+    void VisitExpr_(const MinNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_cmp += this->prod_loop_extent_;
+      } else {
+        result_.int_cmp += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(EQNode, float_cmp, int_cmp);
+    // Expands to
+    void VisitExpr_(const EQNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_cmp += this->prod_loop_extent_;
+      } else {
+        result_.int_cmp += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(NENode, float_cmp, int_cmp);
+    // Expands to
+    void VisitExpr_(const NENode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_cmp += this->prod_loop_extent_;
+      } else {
+        result_.int_cmp += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(LTNode, float_cmp, int_cmp);
+    // Expands to
+    void VisitExpr_(const LTNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_cmp += this->prod_loop_extent_;
+      } else {
+        result_.int_cmp += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(LENode, float_cmp, int_cmp);
+    // Expands to
+    void VisitExpr_(const LENode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_cmp += this->prod_loop_extent_;
+      } else {
+        result_.int_cmp += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(GTNode, float_cmp, int_cmp);
+    // Expands to
+    void VisitExpr_(const GTNode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_cmp += this->prod_loop_extent_;
+      } else {
+        result_.int_cmp += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
+    // TVM_FEATURE_BINARY(GENode, float_cmp, int_cmp);
+    // Expands to
+    void VisitExpr_(const GENode* op) final {
+      if (op->dtype.is_float()) {
+        result_.float_cmp += this->prod_loop_extent_;
+      } else {
+        result_.int_cmp += this->prod_loop_extent_;
+      }
+      ExprVisitor ::VisitExpr_(op);
+    }
 #undef TVM_FEATURE_BINARY
 #undef TVM_FEATURE_SIMPLE
 
@@ -797,12 +964,18 @@ void Feature::Init(const BufferStoreNode* store, int n_loops) {
           info.access_type = AccessType::kRead;
           break;
       }
+      /// @todo (ConvolutedDog) If the indices of BufferLoadNode and
+      /// BufferStoreNode are the same, we consider them as the same
+      /// access, so we do not add it again. But if the indices are
+      /// different, should we add it to the multi_indices?
       if (info.access_type != AccessType::kReadWrite) {
         info.multi_indices.push_back({load->indices.begin(), load->indices.end()});
       }
     }
   });
   this->sub_features.reserve(buffer_info.size());
+  /// buffer_info stores the access type and multi_indices of each
+  /// buffer that is read or written.
   for (const auto& kv : buffer_info) {
     this->sub_features.emplace_back(kv.first, kv.second.access_type,
                                     std::move(kv.second.multi_indices), n_loops);
@@ -815,7 +988,10 @@ void Feature::SetRegion(const LoopNest& loop_nest, IntVec* for_touched_bytes,
   int n_loops = loop_nest.loops.size();
   const std::vector<const ForNode*>& loops = loop_nest.loops;
   // Step 1. Initialize and bind all the loop variables to a constant
-  *for_touched_bytes = IntVec(n_loops, 0);
+  *for_touched_bytes = IntVec(n_loops,
+                              0);  // for_touched_bytes stores accessed bytes for each loop,
+                                   // the index is the loop index in `loop_nest.loops`, and
+                                   // the value is the number of bytes accessed by the loop.
   for (int i = 0; i < n_loops; ++i) {
     const ForNode* loop = loops[i];
     analyzer->Bind(loop->loop_var, loop->min, /*allow_override=*/true);
@@ -840,10 +1016,25 @@ void Feature::SetRegion(const LoopNest& loop_nest, IntVec* for_touched_bytes,
       // Note: `feature.access_shape` for `i == 0` is the only one preserved,
       // while others are discarded
       int64_t numel;
+      // `access_shape` stores the const_int_bound (maximum - minimum + 1) of
+      // each dimension of `multi_indices`. The length of `access_shape` is
+      // the same as the dimension of the buffer's shape.
+      //
+      // `numel` multiplies the const_int_bound (maximum - minimum + 1) of
+      // each dimension of the buffer, which is likely the number of elements
+      // accessed for the buffer.
       feature.access_shape = utils::RelaxAndUnion(feature.multi_indices, &numel, analyzer);
       numel = std::max<int64_t>(0, numel);
+      // The first index of `loop_accessed_numel` is the loop index, the second
+      // index is the buffer, and the value is the number of elements accessed
+      // by the loop on the buffer.
       feature.loop_accessed_numel[i][buffer] = numel;
+      // The touched bytes is the number of accessed elements multiplied by the
+      // number of bytes of the buffer's dtype.
       touched_bytes += numel * buffer->dtype.bytes();
+      // The first index of `buffer_touched_under_loop` is the loop, the second
+      // index is the buffer, and the value is the number of elements accessed
+      // by the loop on the buffer.
       (*buffer_touched_under_loop)[loop][buffer].push_back(numel);
     }
   }
@@ -869,6 +1060,7 @@ void Feature::SubFeature::SetStride(const LoopNest& loop_nest, arith::Analyzer* 
     int64_t& num_continuous_bytes = this->num_continuous_bytes = 1;
     const IntVec& access_shape = this->access_shape;
     ICHECK_EQ(access_shape.size(), buffer_shape.size());
+    /// @todo (ConvolutedDog) Why?
     for (int i = ndim - 1; i >= 0; --i) {
       if (access_shape[i] == buffer_shape[i]) {
         num_continuous_bytes = buffer_shape[i] * buffer->dtype.bytes();
