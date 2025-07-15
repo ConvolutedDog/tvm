@@ -55,6 +55,6 @@ def test_tuple_type():
 
 
 if __name__ == "__main__":
-    test_tensor_type_bad_constructor()
+    test_prim_type()
     test_func_type()
     test_tuple_type()
