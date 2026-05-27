@@ -18,9 +18,11 @@
 
 
 import numpy as np
+import pytest
 
 import tvm
 from tvm import relax, testing
+from tvm.relax.op import memory as op_memory
 from tvm.relax.testing.transform import (
     dataflow_alias_analysis,
     dataflow_inplace_analysis,
@@ -621,6 +623,116 @@ def test_dynamic():
     vm = relax.VirtualMachine(ex, tvm.cpu())
     res = vm["main"](x, y)
     assert (expected == res.numpy()).all()
+
+
+# Must stay in sync with IsViewMemoryOp() in src/relax/transform/dataflow_inplace.cc
+VIEW_MEMORY_OPS = (
+    "relax.expand_dims",
+    "relax.squeeze",
+    "relax.reshape",
+    "relax.permute_dims",
+    "relax.memory.view",
+    "relax.memory.ensure_zero_offset",
+)
+
+_EXPECTED_19577 = np.array(
+    [[1.0, 1.0], [4.0, 2.0], [9.0, 3.0], [16.0, 4.0]], dtype=np.float32
+)
+
+
+def _emit_duplicate_view(view_op: str, x: relax.Expr):
+    """Apply the same view-like op twice to x; shapes match #19577 multiply+concat pattern."""
+    if view_op == "relax.expand_dims":
+        a = relax.op.expand_dims(x, axis=1)
+        b = relax.op.expand_dims(x, axis=1)
+    elif view_op == "relax.squeeze":
+        a = relax.op.squeeze(x, axis=[0])
+        b = relax.op.squeeze(x, axis=[0])
+    elif view_op == "relax.reshape":
+        a = relax.op.reshape(x, (4, 1))
+        b = relax.op.reshape(x, (4, 1))
+    elif view_op == "relax.permute_dims":
+        a = relax.op.permute_dims(x, axes=[1, 0])
+        b = relax.op.permute_dims(x, axes=[1, 0])
+    elif view_op == "relax.memory.view":
+        a = op_memory.view(x, (4, 1))
+        b = op_memory.view(x, (4, 1))
+    elif view_op == "relax.memory.ensure_zero_offset":
+        a = op_memory.ensure_zero_offset(x)
+        b = op_memory.ensure_zero_offset(x)
+    else:
+        raise ValueError(view_op)
+    return a, b
+
+
+def _build_19577_module(view_op: str):
+    """Build main: two views of x, multiply, concat — same shape pattern as issue #19577."""
+    if view_op == "relax.expand_dims":
+        x_sinfo = relax.TensorStructInfo((4,), "float32")
+    elif view_op == "relax.squeeze":
+        x_sinfo = relax.TensorStructInfo((1, 4, 1), "float32")
+    elif view_op == "relax.reshape":
+        x_sinfo = relax.TensorStructInfo((4,), "float32")
+    elif view_op == "relax.permute_dims":
+        x_sinfo = relax.TensorStructInfo((1, 4), "float32")
+    elif view_op == "relax.memory.view":
+        x_sinfo = relax.TensorStructInfo((4,), "float32")
+    elif view_op == "relax.memory.ensure_zero_offset":
+        x_sinfo = relax.TensorStructInfo((4, 1), "float32")
+    else:
+        raise ValueError(view_op)
+
+    bb = relax.BlockBuilder()
+    x = relax.Var("x", x_sinfo)
+    with bb.function("main", [x]):
+        with bb.dataflow():
+            a_expr, b_expr = _emit_duplicate_view(view_op, x)
+            a = bb.emit(a_expr)
+            b = bb.emit(b_expr)
+            prod = bb.emit(relax.op.multiply(a, b))
+            out = bb.emit(relax.op.concat([prod, b], axis=1))
+            gv = bb.emit_output(out)
+        bb.emit_func_output(gv)
+    return bb.finalize()
+
+
+def _input_for_view_op(view_op: str) -> np.ndarray:
+    if view_op == "relax.permute_dims":
+        return np.array([[1.0, 2.0, 3.0, 4.0]], dtype=np.float32)
+    if view_op == "relax.squeeze":
+        return np.array([[[1.0], [2.0], [3.0], [4.0]]], dtype=np.float32)
+    if view_op == "relax.memory.ensure_zero_offset":
+        return np.array([[1.0], [2.0], [3.0], [4.0]], dtype=np.float32)
+    return np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+
+
+@pytest.mark.parametrize("view_op", VIEW_MEMORY_OPS)
+def test_no_inplace_when_view_ops_share_input(view_op):
+    """Duplicate view-like ops on the same tensor may share storage (#19577)."""
+    mod = _build_19577_module(view_op)
+    block = mod["main"].body.blocks[0]
+
+    alias_sets, _ = dataflow_alias_analysis(block, [])
+    a_var = block.bindings[0].var
+    b_var = block.bindings[1].var
+    assert alias_sets[a_var] & alias_sets[b_var], (
+        f"{view_op}: duplicate views should share alias sets, got "
+        f"{alias_sets[a_var]} and {alias_sets[b_var]}"
+    )
+
+    _, exact_match = dataflow_inplace_analysis(block, [], mod)
+    assert exact_match == [], f"{view_op}: expected no in-place opportunities"
+
+    x_np = _input_for_view_op(view_op)
+    mod_inplace = DataflowUseInplaceCalls()(mod)
+    tvm.ir.assert_structural_equal(mod_inplace, mod), (
+        f"{view_op}: pass should not rewrite the module"
+    )
+
+    ex = tvm.compile(mod_inplace, tvm.target.Target("llvm"))
+    vm = relax.VirtualMachine(ex, tvm.cpu())
+    out = vm["main"](tvm.runtime.tensor(x_np, tvm.cpu()))
+    np.testing.assert_allclose(out.numpy(), _EXPECTED_19577, err_msg=view_op)
 
 
 def test_dynamic_mismatch():
